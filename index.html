@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>兴趣词汇学习卡片</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .generator-section {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            margin-bottom: 40px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #333;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e1e5e9;
+            border-radius: 12px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .vocabulary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        }
+
+        .card-image {
+            height: 200px;
+            background-size: cover;
+            background-position: center;
+            position: relative;
+        }
+
+        .card-category {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: rgba(102, 126, 234, 0.9);
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .card-content {
+            padding: 25px;
+        }
+
+        .word {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .pronunciation {
+            color: #667eea;
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            font-style: italic;
+        }
+
+        .example {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 12px;
+            margin-top: 15px;
+        }
+
+        .example-label {
+            font-weight: 500;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .example-text {
+            color: #555;
+            line-height: 1.5;
+        }
+
+        .no-cards {
+            text-align: center;
+            color: #666;
+            padding: 40px;
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .vocabulary-cards {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-book-open"></i> 兴趣词汇学习卡片</h1>
+            <p>根据您的兴趣生成个性化词汇卡片，让学习更有趣</p>
+        </div>
+
+        <div class="generator-section">
+            <form id="vocabularyForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="language">目标语言</label>
+                        <select id="language" required>
+                            <option value="">选择语言</option>
+                            <option value="英语">英语</option>
+                            <option value="日语">日语</option>
+                            <option value="韩语">韩语</option>
+                            <option value="法语">法语</option>
+                            <option value="德语">德语</option>
+                            <option value="西班牙语">西班牙语</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="topic">兴趣话题</label>
+                        <input type="text" id="topic" placeholder="如：科技、美食、旅行、音乐等" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="proficiency">语言水平</label>
+                    <select id="proficiency">
+                        <option value="初级">初级</option>
+                        <option value="中级" selected>中级</option>
+                        <option value="高级">高级</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="btn" id="generateBtn">
+                    <i class="fas fa-magic"></i>
+                    生成词汇卡片
+                </button>
+            </form>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>正在为您生成个性化词汇卡片...</p>
+            </div>
+
+            <div id="error" class="error" style="display: none;"></div>
+        </div>
+
+        <div class="vocabulary-cards" id="vocabularyCards">
+            <div class="no-cards">
+                <i class="fas fa-graduation-cap" style="font-size: 3rem; color: #ccc; margin-bottom: 15px;"></i>
+                <h3>开始您的学习之旅</h3>
+                <p>填写上方表单，我们将为您生成精美的词汇学习卡片</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 模拟词汇数据（实际应用中应替换为真实的LLM API调用）
+        const vocabularyDatabase = {
+            "英语": {
+                "科技": [
+                    {
+                        word: "algorithm",
+                        pronunciation: "/ˈælɡərɪðəm/",
+                        category: "编程",
+                        example: "This search algorithm is much more efficient than the previous one.",
+                        example_cn: "这个搜索算法比之前的高效得多。",
+                        image: "https://images.unsplash.com/photo-1555949963-aa79dcee981c?w=400"
+                    },
+                    {
+                        word: "artificial intelligence",
+                        pronunciation: "/ɑːrˌtɪfɪʃl ɪnˈtelɪdʒəns/",
+                        category: "AI",
+                        example: "Artificial intelligence is transforming how we interact with technology.",
+                        example_cn: "人工智能正在改变我们与技术的交互方式。",
+                        image: "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=400"
+                    },
+                    {
+                        word: "blockchain",
+                        pronunciation: "/ˈblɒktʃeɪn/",
+                        category: "加密货币",
+                        example: "Blockchain technology ensures secure and transparent transactions.",
+                        example_cn: "区块链技术确保交易的安全性和透明性。",
+                        image: "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=400"
+                    }
+                ],
+                "美食": [
+                    {
+                        word: "gourmet",
+                        pronunciation: "/ˈɡʊərmeɪ/",
+                        category: "烹饪",
+                        example: "This restaurant serves gourmet dishes from around the world.",
+                        example_cn: "这家餐厅供应世界各地的美食。",
+                        image: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400"
+                    },
+                    {
+                        word: "delicious",
+                        pronunciation: "/dɪˈlɪʃəs/",
+                        category: "描述",
+                        example: "The chocolate cake was absolutely delicious!",
+                        example_cn: "这个巧克力蛋糕绝对美味！",
+                        image: "https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400"
+                    },
+                    {
+                        word: "recipe",
+                        pronunciation: "/ˈresəpi/",
+                        category: "烹饪",
+                        example: "Can you share your grandmother's secret recipe?",
+                        example_cn: "你能分享一下你奶奶的秘方吗？",
+                        image: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400"
+                    }
+                ],
+                "旅行": [
+                    {
+                        word: "adventure",
+                        pronunciation: "/ədˈventʃər/",
+                        category: "体验",
+                        example: "Traveling solo in Japan was the greatest adventure of my life.",
+                        example_cn: "独自在日本旅行是我人生中最棒的冒险。",
+                        image: "https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=400"
+                    },
+                    {
+                        word: "destination",
+                        pronunciation: "/ˌdestɪˈneɪʃn/",
+                        category: "地点",
+                        example: "Our final destination is a small village in the Swiss Alps.",
+                        example_cn: "我们的最终目的地是瑞士阿尔卑斯山的一个小村庄。",
+                        image: "https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400"
+                    },
+                    {
+                        word: "itinerary",
+                        pronunciation: "/aɪˈtɪnərəri/",
+                        category: "计划",
+                        example: "Here's our detailed itinerary for the two-week trip to Italy.",
+                        example_cn: "这是我们意大利两周旅行的详细行程。",
+                        image: "https://images.unsplash.com/photo-1436491865332-7a61a109cc05?w=400"
+                    }
+                ]
+            },
+            "日语": {
+                "科技": [
+                    {
+                        word: "人工知能",
+                        pronunciation: "じんこうちのう (jinkō chinō)",
+                        category: "AI",
+                        example: "人工知能は私たちの生活を便利にしてくれます。",
+                        example_cn: "人工智能让我们的生活变得更便利。",
+                        image: "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=400"
+                    },
+                    {
+                        word: "プログラミング",
+                        pronunciation: "ぷろぐらみんぐ (puroguramingu)",
+                        category: "编程",
+                        example: "週末にプログラミングを学び始めました。",
+                        example_cn: "我开始在周末学习编程。",
+                        image: "https://images.unsplash.com/photo-1555949963-aa79dcee981c?w=400"
+                    }
+                ]
+            },
+            "法语": {
+                "美食": [
+                    {
+                        word: "délicieux",
+                        pronunciation: "/de.li.sjø/",
+                        category: "描述",
+                        example: "Ce plat est vraiment délicieux !",
+                        example_cn: "这道菜真的很好吃！",
+                        image: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400"
+                    }
+                ]
+            }
+        };
+
+        class VocabularyGenerator {
+            constructor() {
+                this.form = document.getElementById('vocabularyForm');
+                this.loading = document.getElementById('loading');
+                this.cardsContainer = document.getElementById('vocabularyCards');
+                this.errorDiv = document.getElementById('error');
+                
+                this.init();
+            }
+
+            init() {
+                this.form.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.generateVocabulary();
+                });
+            }
+
+            async generateVocabulary() {
+                const language = document.getElementById('language').value;
+                const topic = document.getElementById('topic').value;
+                const proficiency = document.getElementById('proficiency').value;
+
+                this.showLoading();
+                this.hideError();
+
+                try {
+                    // 模拟API调用延迟
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    const vocabulary = await this.fetchVocabulary(language, topic, proficiency);
+                    this.displayVocabulary(vocabulary);
+                } catch (error) {
+                    this.showError(error.message);
+                } finally {
+                    this.hideLoading();
+                }
+            }
+
+            async fetchVocabulary(language, topic, proficiency) {
+                // 在实际应用中，这里应该调用真实的LLM API
+                // 这里使用模拟数据
+                const languageData = vocabularyDatabase[language];
+                if (!languageData) {
+                    throw new Error(`暂不支持 ${language} 语言`);
+                }
+
+                const topicData = languageData[topic];
+                if (!topicData) {
+                    // 如果没有精确匹配的话题，返回该语言下的所有词汇
+                    const allWords = [];
+                    Object.values(languageData).forEach(words => {
+                        allWords.push(...words);
+                    });
+                    return allWords.slice(0, 6); // 限制返回数量
+                }
+
+                return topicData;
+            }
+
+            displayVocabulary(vocabulary) {
+                if (!vocabulary || vocabulary.length === 0) {
+                    this.cardsContainer.innerHTML = `
+                        <div class="no-cards">
+                            <i class="fas fa-search" style="font-size: 3rem; color: #ccc; margin-bottom: 15px;"></i>
+                            <h3>未找到相关词汇</h3>
+                            <p>请尝试其他话题或语言</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                this.cardsContainer.innerHTML = '';
+                
+                vocabulary.forEach(item => {
+                    const card = this.createCard(item);
+                    this.cardsContainer.appendChild(card);
+                });
+            }
+
+            createCard(item) {
+                const card = document.createElement('div');
+                card.className = 'card';
+                
+                card.innerHTML = `
+                    <div class="card-image" style="background-image: url('${item.image}')">
+                        <span class="card-category">${item.category}</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="word">${item.word}</div>
+                        <div class="pronunciation">${item.pronunciation}</div>
+                        <div class="example">
+                            <div class="example-label">例句：</div>
+                            <div class="example-text">${item.example}</div>
+                            <div class="example-text" style="margin-top: 8px; color: #888;">${item.example_cn}</div>
+                        </div>
+                    </div>
+                `;
+
+                return card;
+            }
+
+            showLoading() {
+                this.loading.style.display = 'block';
+                document.getElementById('generateBtn').disabled = true;
+            }
+
+            hideLoading() {
+                this.loading.style.display = 'none';
+                document.getElementById('generateBtn').disabled = false;
+            }
+
+            showError(message) {
+                this.errorDiv.textContent = message;
+                this.errorDiv.style.display = 'block';
+            }
+
+            hideError() {
+                this.errorDiv.style.display = 'none';
+            }
+        }
+
+        // 初始化应用
+        document.addEventListener('DOMContentLoaded', () => {
+            new VocabularyGenerator();
+        });
+    </script>
+</body>
+</html>
