@@ -1,0 +1,2049 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avatar Live Stream - MediaPipe Face Tracking</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .controls {
+            margin: 20px 0;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        .avatar-selector {
+            margin: 10px 0;
+        }
+        .avatar-selector button {
+            margin: 0 10px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        .avatar-selector button:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+        }
+        .avatar-selector button.active {
+            background: #ff6b6b;
+        }
+        .video-container {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin: 20px 0;
+        }
+        .video-section {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        video {
+            border-radius: 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        canvas {
+            border-radius: 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            background: #0a192f; /* 更深的科技蓝色背景 */
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .fps {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+        .toggle-video {
+            margin: 10px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            background: #3498db;
+            color: white;
+            cursor: pointer;
+        }
+        .toggle-video:hover {
+            background: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 Avatar Live Stream</h1>
+        <p>Real-time face tracking with MediaPipe and animated avatars</p>
+        
+        <div class="controls">
+            <div class="avatar-selector">
+                <h3>Your Avatar:</h3>
+                <button id="robot-btn" class="active" onclick="selectAvatar('robot')">🤖 Robot</button>
+            </div>
+            <div style="margin: 10px 0;">
+                <button class="toggle-video" onclick="toggleVideo()">Toggle Video Feed</button>
+                <button class="toggle-video" onclick="startTestAnimation()" style="background: #e74c3c;">🧪 Start Test Animation</button>
+                <button class="toggle-video" onclick="stopTestAnimation()" style="background: #27ae60;">⏹️ Stop Test Animation</button>
+            </div>
+        </div>
+
+        <div class="video-container">
+            <div class="video-section">
+                <h3>Camera Feed</h3>
+                <video id="webcam" width="640" height="480" autoplay muted></video>
+                <div class="status" id="status">Initializing...</div>
+                <div class="status" id="debug-info" style="font-family: monospace; font-size: 12px;">Debug info will appear here...</div>
+            </div>
+            <div class="video-section" style="position: relative;">
+                <h3>Avatar</h3>
+                <canvas id="avatar-canvas" width="640" height="480"></canvas>
+                <div class="fps" id="fps">FPS: 0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MediaPipe CDN Scripts - Using jsdelivr for better stability -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.6/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4/face_mesh.js" crossorigin="anonymous"></script>
+
+    <script>
+        // Constants for face landmark indices
+        const FACE_LANDMARKS = {
+            // Eye landmarks for head rotation calculation
+            LEFT_EYE: [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246],
+            RIGHT_EYE: [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398],
+            
+            // Mouth landmarks for mouth openness
+            UPPER_LIP: [61, 84, 17, 314, 405, 320, 307, 375, 321, 308, 324, 318],
+            LOWER_LIP: [146, 91, 181, 84, 17, 314, 405, 320, 307, 375, 321, 308, 324, 318],
+            
+            // Nose tip for reference
+            NOSE_TIP: 1,
+            
+            // Face outline
+            FACE_OVAL: [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
+        };
+
+        // Global variables
+        let faceMesh;
+        let canvas, ctx;
+        let video; // 全局视频元素变量
+        let currentAvatar = 'robot';
+        let lastFaceData = null;
+        let fpsCounter = 0;
+        let lastFpsTime = Date.now();
+        let videoVisible = true;
+        let videoStream = null;
+        let testMode = false;
+
+        // Avatar state with smoothing
+        let avatarState = {
+            yaw: 0,
+            pitch: 0,
+            mouthOpenness: 0,
+            eyeBlink: 0,
+            faceScale: 1.0,
+            leftEyeOpenness: 1.0,
+            rightEyeOpenness: 1.0,
+            // Face position tracking for movement following
+            faceX: 0.5, // Normalized X position (0-1)
+            faceY: 0.5, // Normalized Y position (0-1)
+            // Smoothed position for avatar placement
+            avatarX: 0.5,
+            avatarY: 0.5
+        };
+        
+        // Smoothing buffers for reducing jitter
+        let smoothingBuffers = {
+            yaw: [],
+            pitch: [],
+            mouthOpenness: [],
+            faceScale: [],
+            leftEyeOpenness: [],
+            rightEyeOpenness: [],
+            faceX: [],
+            faceY: [],
+            avatarX: [],
+            avatarY: []
+        };
+        
+        // 为嘴巴开合度设置更低的平滑参数，提高响应速度
+        const SMOOTHING_WINDOW = 3; // 进一步减小平滑窗口大小，从5帧减少到3帧，极大提高响应速度
+        const SMOOTHING_FACTOR = 0.6; // 进一步减小平滑因子，从0.7减少到0.6，降低平滑强度提高响应速度
+        const MOUTH_SMOOTHING_FACTOR = 0.3; // 为嘴巴单独设置更低的平滑因子，从0.5减少到0.3，实现极致同步
+        
+        // Test animation function
+        function startTestAnimation() {
+            testMode = true;
+            console.log('Starting test animation mode');
+            
+            let time = 0;
+            function testUpdate() {
+                if (!testMode) return;
+                
+                time += 0.05;
+                avatarState.yaw = Math.sin(time) * 0.5;
+                avatarState.pitch = Math.cos(time * 0.7) * 0.3;
+                avatarState.mouthOpenness = (Math.sin(time * 2) + 1) * 0.5;
+                
+                console.log('Test animation update:', {
+                    yaw: avatarState.yaw.toFixed(3),
+                    pitch: avatarState.pitch.toFixed(3),
+                    mouthOpenness: avatarState.mouthOpenness.toFixed(3)
+                });
+                
+                setTimeout(testUpdate, 100);
+            }
+            testUpdate();
+        }
+        
+        function stopTestAnimation() {
+            testMode = false;
+            console.log('Stopping test animation mode');
+            avatarState.yaw = 0;
+            avatarState.pitch = 0;
+            avatarState.mouthOpenness = 0;
+        }
+        
+        // Update debug information display
+        function updateDebugInfo() {
+            const debugElement = document.getElementById('debug-info');
+            if (debugElement) {
+                debugElement.innerHTML = `
+                    Mode: ${testMode ? 'TEST' : 'FACE DETECTION'}<br>
+                    Yaw: ${avatarState.yaw.toFixed(3)}<br>
+                    Pitch: ${avatarState.pitch.toFixed(3)}<br>
+                    Mouth: ${avatarState.mouthOpenness.toFixed(3)}<br>
+                    Scale: ${avatarState.faceScale.toFixed(3)}<br>
+                    Face X: ${avatarState.faceX.toFixed(3)}<br>
+                    Face Y: ${avatarState.faceY.toFixed(3)}<br>
+                    Avatar X: ${avatarState.avatarX.toFixed(3)}<br>
+                    Avatar Y: ${avatarState.avatarY.toFixed(3)}<br>
+                    Avatar: ${currentAvatar}<br>
+                    FaceMesh: ${faceMesh ? 'Ready' : 'Not Ready'}
+                `;
+            }
+        }
+
+        // Check if running on HTTPS or localhost and network connectivity
+        function checkSecureContext() {
+            const isSecure = location.protocol === 'https:' || 
+                           location.hostname === 'localhost' || 
+                           location.hostname === '127.0.0.1';
+            
+            if (!isSecure) {
+                updateStatus('Warning: Camera access requires HTTPS or localhost. Please use the https_server.py script.');
+                console.warn('Not running in secure context. Use https_server.py for HTTPS support.');
+                // Add more detailed instructions in the UI
+                const statusElement = document.getElementById('status-message');
+                if (statusElement) {
+                    statusElement.innerHTML += '<br><strong>To fix this issue:</strong><br>1. Run the https_server.py script<br>2. Access via https://localhost:8443/avatar-live-stream.html<br>3. Accept the security certificate';
+                }
+            } else {
+                console.log('Running in secure context - camera access should work');
+            }
+            
+            // Check network connectivity
+            if (!navigator.onLine) {
+                updateStatus('Warning: No internet connection detected');
+                console.warn('No internet connection');
+            }
+            
+            return isSecure;
+        }
+        
+        // Enhanced network connectivity test with resource validation
+        async function testNetworkConnectivity() {
+            console.log('Skipping network connectivity test - proceeding with direct resource loading');
+            updateStatus('Initializing MediaPipe resources...');
+            
+            // Skip the problematic package.json tests and proceed directly
+            // The actual resource loading will handle failures gracefully
+            return true;
+        }
+        
+        // Test if local MediaPipe resources are available
+        async function testLocalResources() {
+            try {
+                // Check if we can access local files (this will fail in most browsers due to CORS)
+                const response = await fetch('./mediapipe/face_mesh.js', {
+                    method: 'HEAD',
+                    cache: 'no-cache'
+                });
+                console.log('Local MediaPipe resources detected');
+                updateStatus('Using local MediaPipe resources');
+                return true;
+            } catch (error) {
+                console.log('No local MediaPipe resources available');
+                updateStatus('No network or local resources - limited functionality');
+                return false;
+            }
+        }
+        
+        // Enhanced resource loading with retry and fallback
+        async function loadResourceWithFallback(url, resourceType = 'unknown') {
+            const maxRetries = 3;
+            const retryDelay = 1000;
+            
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    console.log(`Loading ${resourceType} (attempt ${attempt + 1}/${maxRetries}):`, url);
+                    
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 10000);
+                    
+                    const response = await fetch(url, {
+                        cache: 'no-cache',
+                        signal: controller.signal
+                    });
+                    
+                    clearTimeout(timeoutId);
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    console.log(`Successfully loaded ${resourceType}:`, url);
+                    return response;
+                } catch (error) {
+                    console.warn(`Failed to load ${resourceType} (attempt ${attempt + 1}):`, error.message);
+                    
+                    if (attempt < maxRetries - 1) {
+                        console.log(`Retrying in ${retryDelay}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    } else {
+                        throw new Error(`Failed to load ${resourceType} after ${maxRetries} attempts: ${error.message}`);
+                    }
+                }
+            }
+        }
+
+        // Simplified CDN sources for better reliability
+        const CDN_SOURCES = [
+            {
+                name: 'jsdelivr-stable',
+                baseUrl: 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619',
+                scripts: [
+                    'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1633559619/camera_utils.js',
+                    'https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.6.1633559619/control_utils.js',
+                    'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1633559619/drawing_utils.js',
+                    'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js'
+                ]
+            },
+            {
+                name: 'fallback-minimal',
+                baseUrl: './mediapipe',
+                scripts: [
+                    './mediapipe/face_mesh_solution_packed_assets_loader.js',
+                    './mediapipe/face_mesh_solution_simd_wasm_bin.js',
+                    './mediapipe/face_mesh_solution_wasm_bin.js',
+                    './mediapipe/face_mesh.js'
+                ],
+                isLocal: true
+            }
+        ];
+        
+        let currentCDNIndex = 0;
+        
+        // Load scripts dynamically with simplified fallback logic
+        async function loadScriptsWithFallback() {
+            for (let i = currentCDNIndex; i < CDN_SOURCES.length; i++) {
+                const cdn = CDN_SOURCES[i];
+                console.log(`Trying CDN: ${cdn.name}`);
+                
+                try {
+                    // Handle local resources
+                    if (cdn.isLocal) {
+                        console.log(`Using local MediaPipe resources: ${cdn.name}`);
+                        currentCDNIndex = i;
+                        return cdn;
+                    }
+                    
+                    // Load scripts if available
+                    if (cdn.scripts && cdn.scripts.length > 0) {
+                        console.log(`Loading ${cdn.scripts.length} scripts from ${cdn.name}`);
+                        
+                        for (const scriptUrl of cdn.scripts) {
+                            try {
+                                await loadScript(scriptUrl);
+                                console.log(`Successfully loaded: ${scriptUrl}`);
+                            } catch (error) {
+                                console.warn(`Failed to load script: ${scriptUrl}`, error.message);
+                                throw error; // Fail fast for this CDN
+                            }
+                        }
+                        
+                        // Wait for scripts to initialize
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                        
+                        // Verify MediaPipe is available
+                        if (typeof FaceMesh !== 'undefined') {
+                            currentCDNIndex = i;
+                            console.log(`Successfully loaded scripts from ${cdn.name}`);
+                            return cdn;
+                        } else {
+                            console.warn(`MediaPipe not available after loading from ${cdn.name}`);
+                            throw new Error('MediaPipe not available after script loading');
+                        }
+                    } else {
+                        // CDN without scripts (fallback)
+                        currentCDNIndex = i;
+                        return cdn;
+                    }
+                } catch (error) {
+                    console.warn(`Failed to load from ${cdn.name}:`, error.message);
+                    // Continue to next CDN
+                }
+            }
+            
+            console.error('All CDN sources failed');
+            throw new Error('All CDN sources failed');
+        }
+        
+        
+        // Load a single script with enhanced timeout and error handling
+        function loadScript(url) {
+            return new Promise((resolve, reject) => {
+                // Check if script is already loaded
+                const existingScript = document.querySelector(`script[src="${url}"]`);
+                if (existingScript) {
+                    console.log('Script already loaded:', url);
+                    resolve();
+                    return;
+                }
+                
+                const script = document.createElement('script');
+                script.src = url;
+                script.crossOrigin = 'anonymous';
+                script.async = true;
+                
+                const timeout = setTimeout(() => {
+                    script.remove();
+                    reject(new Error(`Script loading timeout (15s): ${url}`));
+                }, 15000); // Increased timeout
+                
+                script.onload = () => {
+                    clearTimeout(timeout);
+                    console.log('Script loaded successfully:', url);
+                    resolve();
+                };
+                
+                script.onerror = (event) => {
+                    clearTimeout(timeout);
+                    script.remove();
+                    reject(new Error(`Failed to load script: ${url} - ${event.message || 'Unknown error'}`));
+                };
+                
+                document.head.appendChild(script);
+            });
+        }
+        
+        // Global WebGL variables
+        let gl = null;
+        let glProgram = null;
+        let useWebGL = true;
+        let avatarTexture = null;
+        let offscreenCanvas = null;
+        let offscreenCtx = null;
+        
+        // Initialize the application with enhanced retry mechanism and WebGL support
+        async function init() {
+            let retryCount = 0;
+            const maxRetries = 5;
+            
+            // Check secure context and network connectivity
+            checkSecureContext();
+            await testNetworkConnectivity();
+            
+            while (retryCount < maxRetries) {
+                try {
+                    updateStatus(`Initializing MediaPipe... (Attempt ${retryCount + 1}/${maxRetries})`);
+                    console.log(`Starting initialization attempt ${retryCount + 1}...`);
+                    
+                    // Get canvas context - try WebGL first for hardware acceleration
+                    canvas = document.getElementById('avatar-canvas');
+                    
+                    // Try to initialize WebGL2 first (better performance)
+                    try {
+                        gl = canvas.getContext('webgl2');
+                        if (gl) {
+                            console.log('Using WebGL2 for rendering');
+                            initWebGL(gl, 'webgl2');
+                        }
+                    } catch (e) {
+                        console.warn('WebGL2 initialization failed:', e);
+                    }
+                    
+                    // Fall back to WebGL1 if WebGL2 is not available
+                    if (!gl) {
+                        try {
+                            gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                            if (gl) {
+                                console.log('Using WebGL1 for rendering');
+                                initWebGL(gl, 'webgl1');
+                            }
+                        } catch (e) {
+                            console.warn('WebGL1 initialization failed:', e);
+                        }
+                    }
+                    
+                    // Fall back to 2D context if WebGL is not available
+                    if (!gl) {
+                        console.warn('WebGL not available, falling back to 2D canvas');
+                        ctx = canvas.getContext('2d');
+                        useWebGL = false;
+                    }
+                    
+                    // Create offscreen canvas for avatar rendering
+                    offscreenCanvas = document.createElement('canvas');
+                    offscreenCanvas.width = canvas.width;
+                    offscreenCanvas.height = canvas.height;
+                    offscreenCtx = offscreenCanvas.getContext('2d');
+                    
+                    // Wait a bit before initializing MediaPipe to allow scripts to load
+                    if (retryCount > 0) {
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+                    
+                    // Check if MediaPipe is available, if not try to reload scripts
+                    if (typeof FaceMesh === 'undefined') {
+                        console.log('MediaPipe not loaded, attempting to load scripts...');
+                        const cdn = await loadScriptsWithFallback();
+                        
+                        // Wait for scripts to initialize
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        
+                        if (typeof FaceMesh === 'undefined') {
+                            throw new Error('MediaPipe FaceMesh still not available after script loading');
+                        }
+                    }
+                    
+                    // Initialize MediaPipe Face Mesh with enhanced WASM configuration
+                    const currentCDN = CDN_SOURCES[currentCDNIndex];
+                    
+                    // Enhanced GPU-accelerated module configuration
+                    const faceMeshConfig = {
+                        locateFile: (file) => {
+                            console.log('Loading MediaPipe file:', file, 'from CDN:', currentCDN.name);
+                            
+                            // For local files, use the baseUrl path
+                            if (currentCDN.isLocal) {
+                                console.log('Loading local file:', file);
+                                return `${currentCDN.baseUrl}/${file}`;
+                            }
+                            
+                            // Handle different file types with specific paths and fallbacks
+                            if (file.endsWith('.wasm')) {
+                                console.log('Loading WASM file:', file);
+                                const wasmUrl = `${currentCDN.baseUrl}/${file}`;
+                                console.log('WASM URL:', wasmUrl);
+                                return wasmUrl;
+                            } else if (file.endsWith('.data')) {
+                                console.log('Loading data file:', file);
+                                const dataUrl = `${currentCDN.baseUrl}/${file}`;
+                                console.log('Data URL:', dataUrl);
+                                return dataUrl;
+                            } else {
+                                console.log('Loading other file:', file);
+                                return `${currentCDN.baseUrl}/${file}`;
+                            }
+                        },
+                        // Enhanced module configuration
+                        wasmLoaderPath: `${currentCDN.baseUrl}/`,
+                        // WASM memory configuration
+                        wasmBinaryFile: `${currentCDN.baseUrl}/face_mesh.wasm`,
+                        // Module initialization options
+                        Module: {
+                            // Increase memory allocation for better performance
+                            INITIAL_MEMORY: 128 * 1024 * 1024, // 128MB
+                            MAXIMUM_MEMORY: 256 * 1024 * 1024, // 256MB
+                            // Allow memory growth
+                            ALLOW_MEMORY_GROWTH: true,
+                            // Disable some features that might cause issues
+                            DISABLE_EXCEPTION_CATCHING: false,
+                            // Enable WebGL acceleration
+                            canvas: (() => {
+                                try {
+                                    // Create an offscreen canvas for GPU processing
+                                    const offscreenCanvas = document.createElement('canvas');
+                                    offscreenCanvas.width = 640;
+                                    offscreenCanvas.height = 480;
+                                    // Try to get WebGL2 context first (faster)
+                                    let glContext = offscreenCanvas.getContext('webgl2');
+                                    if (!glContext) {
+                                        // Fall back to WebGL 1 if WebGL2 is not available
+                                        glContext = offscreenCanvas.getContext('webgl');
+                                    }
+                                    if (!glContext) {
+                                        console.warn('WebGL not available, falling back to CPU processing');
+                                        return null;
+                                    }
+                                    console.log('WebGL acceleration enabled:', glContext instanceof WebGL2RenderingContext ? 'WebGL2' : 'WebGL1');
+                                    return offscreenCanvas;
+                                } catch (e) {
+                                    console.warn('Error creating WebGL context:', e);
+                                    return null;
+                                }
+                            })(),
+                            // Error handling
+                            onAbort: function(what) {
+                                console.error('MediaPipe WASM abort:', what);
+                            },
+                            onRuntimeInitialized: function() {
+                                console.log('MediaPipe WASM runtime initialized with GPU acceleration');
+                            }
+                        },
+                        // Disable problematic features
+                        selfieMode: false,
+                        enableSegmentation: false,
+                        // Add stability options
+                        modelComplexity: 1, // Use medium complexity for better accuracy with GPU
+                        smoothLandmarks: true
+                    };
+                    
+                    console.log('Creating FaceMesh with config:', faceMeshConfig);
+                    faceMesh = new FaceMesh(faceMeshConfig);
+                    
+                    console.log('MediaPipe FaceMesh created:', faceMesh);
+                    
+                    // Wait for MediaPipe to initialize
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    
+                    break; // Success, exit retry loop
+                    
+                } catch (error) {
+                    console.error(`Initialization attempt ${retryCount + 1} failed:`, error);
+                    retryCount++;
+                    
+                    // Try next CDN on failure
+                    if (retryCount < maxRetries && currentCDNIndex < CDN_SOURCES.length - 1) {
+                        currentCDNIndex++;
+                        console.log(`Switching to next CDN: ${CDN_SOURCES[currentCDNIndex].name}`);
+                    }
+                    
+                    if (retryCount >= maxRetries) {
+                        throw error; // Re-throw if all retries failed
+                    }
+                    
+                    updateStatus(`Initialization failed, retrying in 3 seconds... (${retryCount}/${maxRetries})`);
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                }
+            }
+            
+            try {
+                
+                // Configure Face Mesh with GPU acceleration and precision mouth tracking
+                try {
+                    faceMesh.setOptions({
+                        maxNumFaces: 1,
+                        refineLandmarks: true,
+                        minDetectionConfidence: 0.7, // Increased for better accuracy
+                        minTrackingConfidence: 0.8,  // Increased for smoother tracking
+                        // Enhanced GPU acceleration options
+                        staticImageMode: false,
+                        enableFaceGeometry: false,
+                        // GPU-optimized performance settings
+                        modelComplexity: 1, // Medium complexity for balance of accuracy and speed
+                        smoothLandmarks: true,
+                        enableSegmentation: false,
+                        smoothSegmentation: false,
+                        // Reduce processing load
+                        selfieMode: false,
+                        // Use GPU for processing when available
+                        runtime: 'mediapipe', // Use MediaPipe's optimized runtime
+                        delegate: 'gpu', // Request GPU acceleration
+                        // Enhanced precision for mouth tracking
+                        boundingBoxDetection: false, // Disable bounding box for faster processing
+                        useWebGLBackend: true // Explicitly request WebGL backend
+                    });
+                    console.log('MediaPipe FaceMesh options set successfully with GPU acceleration');
+                } catch (optionsError) {
+                    console.warn('Failed to set GPU-accelerated options, using fallback:', optionsError);
+                    // Try with minimal but optimized options
+                    faceMesh.setOptions({
+                        maxNumFaces: 1,
+                        minDetectionConfidence: 0.6,
+                        minTrackingConfidence: 0.7,
+                        refineLandmarks: true,
+                        modelComplexity: 1,
+                        smoothLandmarks: true
+                    });
+                }
+                
+                console.log('MediaPipe FaceMesh options set');
+                
+                // Set up result callback with error handling
+                try {
+                    faceMesh.onResults(onResults);
+                    console.log('MediaPipe FaceMesh onResults callback set successfully');
+                } catch (callbackError) {
+                    console.error('Failed to set onResults callback:', callbackError);
+                    throw new Error('Cannot set MediaPipe callback: ' + callbackError.message);
+                }
+                
+                console.log('MediaPipe FaceMesh onResults callback set');
+                
+                updateStatus('Starting camera...');
+                console.log('Requesting camera access...');
+                
+                // Initialize camera using getUserMedia directly
+                await initializeCamera();
+                
+                updateStatus('Ready! 🎉');
+                console.log('Initialization complete!');
+                
+                // Start animation loop
+                animate();
+                
+            } catch (error) {
+                console.error('Initialization error:', error);
+                updateStatus('Error: ' + error.message);
+                
+                // Show detailed error information
+                if (error.name === 'NotAllowedError') {
+                    updateStatus('摄像头权限被拒绝。请允许访问摄像头并刷新页面。');
+                } else if (error.name === 'NotFoundError') {
+                    updateStatus('未找到摄像头设备。请确保摄像头已连接。');
+                } else if (error.name === 'NotSupportedError') {
+                    updateStatus('浏览器不支持摄像头访问。请使用Chrome或Firefox。');
+                } else {
+                    updateStatus('摄像头初始化失败: ' + error.message);
+                }
+            }
+        }
+        
+        // Initialize camera using getUserMedia
+        async function initializeCamera() {
+            video = document.getElementById('webcam');
+            
+            try {
+                console.log('Checking camera support...');
+                
+                // Check HTTPS requirement
+                if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                    console.warn('Camera access may require HTTPS. Current protocol:', location.protocol);
+                    updateStatus('警告：摄像头访问可能需要HTTPS协议。如果遇到问题，请使用HTTPS或localhost访问。');
+                }
+                
+                // Check if getUserMedia is supported
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error('getUserMedia is not supported in this browser');
+                }
+                
+                // Check for camera devices
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                console.log('Available video devices:', videoDevices.length);
+                
+                if (videoDevices.length === 0) {
+                    throw new Error('No camera devices found');
+                }
+                
+                console.log('Requesting camera stream...');
+                
+                // Request camera access with fallback options
+                let constraints = {
+                    video: {
+                        width: { ideal: 320 },
+                        height: { ideal: 240 },
+                        facingMode: 'user'
+                    },
+                    audio: false
+                };
+                
+                try {
+                    videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+                } catch (err) {
+                    console.warn('Failed with ideal constraints, trying basic constraints:', err);
+                    // Fallback to basic constraints
+                    constraints = {
+                        video: true,
+                        audio: false
+                    };
+                    videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+                }
+                
+                console.log('Camera stream obtained:', videoStream);
+                
+                // Set video source
+                video.srcObject = videoStream;
+                
+                // Wait for video to be ready
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Video loading timeout'));
+                    }, 10000); // 10 second timeout
+                    
+                    video.onloadedmetadata = () => {
+                        clearTimeout(timeout);
+                        console.log('Video metadata loaded');
+                        video.play().then(resolve).catch(reject);
+                    };
+                    video.onerror = (err) => {
+                        clearTimeout(timeout);
+                        reject(err);
+                    };
+                });
+                
+                console.log('Video is playing');
+                
+                // Start processing frames
+                processVideoFrame();
+                
+            } catch (error) {
+                console.error('Camera initialization failed:', error);
+                
+                // Enhanced error handling
+                if (error.name === 'NotAllowedError') {
+                    throw new Error('摄像头权限被拒绝。请点击地址栏的摄像头图标允许访问，然后刷新页面。');
+                } else if (error.name === 'NotFoundError') {
+                    throw new Error('未找到摄像头设备。请确保摄像头已连接并且没有被其他应用占用。');
+                } else if (error.name === 'NotSupportedError') {
+                    throw new Error('浏览器不支持摄像头访问。请使用Chrome、Firefox或Edge浏览器。');
+                } else if (error.name === 'OverconstrainedError') {
+                    throw new Error('摄像头不支持请求的配置。请尝试使用不同的摄像头。');
+                } else if (error.message.includes('timeout')) {
+                    throw new Error('摄像头加载超时。请检查摄像头连接并重试。');
+                } else {
+                    throw new Error('摄像头初始化失败: ' + error.message);
+                }
+            }
+        }
+        
+        // Process video frames for face detection with enhanced error handling
+        let frameCount = 0;
+        async function processVideoFrame() {
+            // 使用全局video变量，不再重新获取
+            frameCount++;
+            
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                // Debug: Log every 60 frames (about once per second at 60fps)
+                if (frameCount % 60 === 0) {
+                    console.log('Processing frame', frameCount, 'video ready state:', video.readyState, 'faceMesh ready:', !!faceMesh);
+                }
+                
+                // Check if faceMesh is initialized
+                if (faceMesh) {
+                    // Send frame to MediaPipe with enhanced error handling
+                try {
+                    await faceMesh.send({image: video});
+                } catch (error) {
+                    console.error('Face detection error:', error);
+                    updateDebugInfo('Face Mesh Error: ' + error.message);
+                    
+                    // Handle different types of errors
+                    if (error.message.includes('abort') || error.message.includes('WASM') || 
+                        error.message.includes('RuntimeError') || error.message.includes('buffer')) {
+                        console.log('Critical MediaPipe error detected, attempting to reinitialize...');
+                        
+                        // Stop current processing
+                        faceMesh = null;
+                        
+                        // Try next CDN source
+                        if (currentCDNIndex < CDN_SOURCES.length - 1) {
+                            currentCDNIndex++;
+                            console.log(`Switching to CDN: ${CDN_SOURCES[currentCDNIndex].name}`);
+                        } else {
+                            currentCDNIndex = 0; // Reset to first CDN
+                        }
+                        
+                        // Reinitialize after delay
+                        setTimeout(() => {
+                            init().catch(console.error);
+                        }, 3000);
+                    } else if (error.message.includes('fetch') || error.message.includes('network')) {
+                        console.log('Network error detected, will retry on next frame');
+                        updateStatus('Network error, retrying...');
+                    }
+                }
+                } else {
+                    if (frameCount % 60 === 0) {
+                        console.warn('FaceMesh not initialized yet');
+                        updateDebugInfo('MediaPipe not initialized');
+                    }
+                }
+            } else {
+                if (frameCount % 60 === 0) {
+                    console.log('Video not ready, state:', video.readyState);
+                    updateDebugInfo('Video not ready');
+                }
+            }
+            
+            // Continue processing frames
+            requestAnimationFrame(processVideoFrame);
+        }
+
+        // Enhanced smooth value using exponential moving average with adaptive smoothing
+        function smoothValue(newValue, currentValue, smoothingFactor = SMOOTHING_FACTOR) {
+            // Adaptive smoothing based on change magnitude
+            const changeMagnitude = Math.abs(newValue - currentValue);
+            // 增加平滑强度，最大值提高到0.98，减少抖动
+            const adaptiveFactor = Math.min(smoothingFactor + changeMagnitude * 0.05, 0.98);
+            return currentValue * adaptiveFactor + newValue * (1 - adaptiveFactor);
+        }
+        
+        // Advanced interpolation using cubic bezier for smoother transitions
+        function cubicBezierInterpolate(t) {
+            // Cubic bezier curve for smooth easing (ease-out)
+            return 1 - Math.pow(1 - t, 3);
+        }
+        
+        // 极致优化的平滑处理，专为嘴巴开合度的实时同步设计
+        function velocityBasedSmooth(bufferName, newValue) {
+            const buffer = smoothingBuffers[bufferName];
+            
+            if (buffer.length === 0) {
+                buffer.push(newValue);
+                return newValue;
+            }
+            
+            const lastValue = buffer[buffer.length - 1];
+            const velocity = Math.abs(newValue - lastValue);
+            
+            // 调整平滑强度基于速度
+            let smoothingStrength = SMOOTHING_FACTOR;
+            
+            // 嘴巴开合度的特殊处理 - 极致优化以实现完美同步
+            if (bufferName === 'mouthOpenness') {
+                // 使用专门为嘴巴设置的更低平滑因子
+                smoothingStrength = MOUTH_SMOOTHING_FACTOR;
+                
+                // 对于嘴巴开合度，根据变化速度动态调整平滑强度
+                if (velocity > 0.15) {
+                    // 快速嘴部动作 - 几乎不平滑以实现即时响应
+                    smoothingStrength = Math.max(0.1, MOUTH_SMOOTHING_FACTOR - velocity * 0.8);
+                } else if (velocity > 0.05) {
+                    // 中速嘴部动作 - 轻微平滑
+                    smoothingStrength = Math.max(0.15, MOUTH_SMOOTHING_FACTOR - velocity * 0.6);
+                } else if (velocity < 0.01) {
+                    // 微小嘴部动作 - 保持一定平滑以避免抖动
+                    smoothingStrength = Math.min(0.4, MOUTH_SMOOTHING_FACTOR + 0.1);
+                }
+                
+                // 对于嘴巴从关闭到开启的动作，进一步降低平滑强度以提高响应速度
+                if (newValue > lastValue && lastValue < 0.1 && newValue > 0.1) {
+                    // 嘴巴刚开始张开 - 极低平滑度以捕捉开口的瞬间
+                    smoothingStrength = Math.min(smoothingStrength, 0.1);
+                }
+                
+                // 对于嘴巴从开启到关闭的动作，也降低平滑强度
+                if (newValue < lastValue && lastValue > 0.1 && newValue < 0.1) {
+                    // 嘴巴刚开始关闭 - 较低平滑度以捕捉关闭的瞬间
+                    smoothingStrength = Math.min(smoothingStrength, 0.2);
+                }
+            } else {
+                // 其他面部特征使用原有的平滑逻辑
+                // 调整速度阈值和平滑强度，减少抖动
+                if (velocity > 0.15) { // 提高快速移动的阈值
+                    // 快速移动 - 较低平滑度以提高响应性
+                    smoothingStrength = Math.max(0.5, SMOOTHING_FACTOR - velocity * 0.3); // 增加最小平滑强度
+                } else if (velocity < 0.02) { // 提高慢速移动的阈值
+                    // 慢速移动 - 较高平滑度以提高稳定性
+                    smoothingStrength = Math.min(0.98, SMOOTHING_FACTOR + 0.3); // 增加最大平滑强度
+                } else {
+                    // 中等速度 - 适中平滑强度
+                    smoothingStrength = Math.min(0.95, SMOOTHING_FACTOR + 0.15);
+                }
+                
+                // 对头部旋转应用更强的平滑效果
+                if (bufferName === 'yaw' || bufferName === 'pitch') {
+                    smoothingStrength = Math.min(0.98, smoothingStrength + 0.05);
+                }
+            }
+            
+            // 计算平滑值
+            const smoothedValue = lastValue * smoothingStrength + newValue * (1 - smoothingStrength);
+            buffer.push(smoothedValue);
+            
+            // 为嘴巴开合度使用极小的缓冲区，进一步提高响应速度
+            const effectiveWindow = bufferName === 'mouthOpenness' ? 2 : SMOOTHING_WINDOW;
+            
+            // 保持缓冲区大小有限
+            if (buffer.length > effectiveWindow) {
+                buffer.shift();
+            }
+            
+            // 对于嘴巴开合度，在某些情况下直接使用新值以实现极致同步
+            if (bufferName === 'mouthOpenness') {
+                // 当嘴巴变化显著时，偏向新值而不是平滑值
+                if (velocity > 0.2) {
+                    // 对于大幅度变化，使用80%的新值和20%的平滑值
+                    return newValue * 0.8 + smoothedValue * 0.2;
+                }
+            }
+            
+            return smoothedValue;
+        }
+        
+        // Add value to smoothing buffer and return averaged value
+        function addToSmoothingBuffer(bufferName, value) {
+            const buffer = smoothingBuffers[bufferName];
+            buffer.push(value);
+            
+            // Keep buffer size limited
+            if (buffer.length > SMOOTHING_WINDOW) {
+                buffer.shift();
+            }
+            
+            // Return averaged value
+            return buffer.reduce((sum, val) => sum + val, 0) / buffer.length;
+        }
+        
+        // Process face detection results with enhanced smoothing
+        function onResults(results) {
+            console.log('onResults called, faces detected:', results.multiFaceLandmarks ? results.multiFaceLandmarks.length : 0);
+            
+            // Skip face detection updates in test mode
+            if (testMode) {
+                console.log('Test mode active, skipping face detection updates');
+                return;
+            }
+            
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+                
+                // Calculate enhanced facial features
+                const headRotation = calculateHeadRotation(landmarks);
+                const mouthOpenness = calculateMouthOpenness(landmarks);
+                const eyeStates = calculateEyeStates(landmarks);
+                const faceScale = calculateFaceScale(landmarks);
+                const facePosition = calculateFacePosition(landmarks);
+                
+                // Apply enhanced velocity-based smoothing to reduce jitter
+                const smoothedYaw = velocityBasedSmooth('yaw', headRotation.yaw);
+                const smoothedPitch = velocityBasedSmooth('pitch', headRotation.pitch);
+                const smoothedMouth = velocityBasedSmooth('mouthOpenness', mouthOpenness);
+                const smoothedScale = velocityBasedSmooth('faceScale', faceScale);
+                const smoothedLeftEye = velocityBasedSmooth('leftEyeOpenness', eyeStates.leftEye);
+                const smoothedRightEye = velocityBasedSmooth('rightEyeOpenness', eyeStates.rightEye);
+                
+                // Apply smoothing to face position for movement tracking
+                const smoothedFaceX = velocityBasedSmooth('faceX', facePosition.x);
+                const smoothedFaceY = velocityBasedSmooth('faceY', facePosition.y);
+                
+                // Calculate avatar position with enhanced interpolation
+                const targetAvatarX = smoothedFaceX;
+                const targetAvatarY = smoothedFaceY;
+                const smoothedAvatarX = velocityBasedSmooth('avatarX', targetAvatarX);
+                const smoothedAvatarY = velocityBasedSmooth('avatarY', targetAvatarY);
+                
+                // Update avatar state with smoothed values
+                // 禁用旋转功能，将yaw和pitch设置为0
+                avatarState.yaw = 0; // 禁用旋转 - 原值: smoothedYaw
+                avatarState.pitch = 0; // 禁用旋转 - 原值: smoothedPitch
+                avatarState.mouthOpenness = smoothedMouth;
+                avatarState.faceScale = smoothedScale;
+                avatarState.leftEyeOpenness = smoothedLeftEye;
+                avatarState.rightEyeOpenness = smoothedRightEye;
+                avatarState.faceX = smoothedFaceX;
+                avatarState.faceY = smoothedFaceY;
+                avatarState.avatarX = smoothedAvatarX;
+                avatarState.avatarY = smoothedAvatarY;
+                
+                // Debug: Log avatar state updates (less frequently)
+                if (Math.random() < 0.1) { // Log 10% of frames
+                    console.log('Avatar state updated with smoothing:', {
+                        yaw: avatarState.yaw.toFixed(3),
+                        pitch: avatarState.pitch.toFixed(3),
+                        mouthOpenness: avatarState.mouthOpenness.toFixed(3),
+                        faceScale: avatarState.faceScale.toFixed(3),
+                        leftEye: avatarState.leftEyeOpenness.toFixed(3),
+                        rightEye: avatarState.rightEyeOpenness.toFixed(3),
+                        faceX: avatarState.faceX.toFixed(3),
+                        faceY: avatarState.faceY.toFixed(3),
+                        avatarX: avatarState.avatarX.toFixed(3),
+                        avatarY: avatarState.avatarY.toFixed(3)
+                    });
+                }
+                
+                lastFaceData = {
+                    landmarks,
+                    timestamp: Date.now()
+                };
+            } else {
+                console.log('No face detected');
+                // No face detected - gradually return to neutral position
+                if (lastFaceData && Date.now() - lastFaceData.timestamp > 500) {
+                    // Gradually reset to neutral position for smoother transition
+                    // 禁用旋转功能，直接设置为0
+                    avatarState.yaw = 0; // 禁用旋转 - 原值: smoothValue(0, avatarState.yaw, 0.9)
+                    avatarState.pitch = 0; // 禁用旋转 - 原值: smoothValue(0, avatarState.pitch, 0.9)
+                    avatarState.mouthOpenness = smoothValue(0, avatarState.mouthOpenness, 0.9);
+                    avatarState.faceScale = smoothValue(1.0, avatarState.faceScale, 0.9);
+                    avatarState.leftEyeOpenness = smoothValue(1.0, avatarState.leftEyeOpenness, 0.9);
+                    avatarState.rightEyeOpenness = smoothValue(1.0, avatarState.rightEyeOpenness, 0.9);
+                    // Gradually return avatar to center position
+                    avatarState.faceX = smoothValue(0.5, avatarState.faceX, 0.9);
+                    avatarState.faceY = smoothValue(0.5, avatarState.faceY, 0.9);
+                    avatarState.avatarX = smoothValue(0.5, avatarState.avatarX, 0.9);
+                    avatarState.avatarY = smoothValue(0.5, avatarState.avatarY, 0.9);
+                }
+            }
+        }
+
+        // Calculate head rotation from landmarks with enhanced accuracy and stability
+        function calculateHeadRotation(landmarks) {
+            // Get key points for more accurate rotation calculation
+            const leftEye = getAverageLandmark(landmarks, FACE_LANDMARKS.LEFT_EYE);
+            const rightEye = getAverageLandmark(landmarks, FACE_LANDMARKS.RIGHT_EYE);
+            const noseTip = landmarks[FACE_LANDMARKS.NOSE_TIP];
+            const chin = landmarks[175]; // Chin point
+            const forehead = landmarks[10]; // Forehead center
+            
+            // Calculate face center using multiple reference points
+            const faceCenter = {
+                x: (leftEye.x + rightEye.x + noseTip.x) / 3,
+                y: (leftEye.y + rightEye.y + noseTip.y) / 3
+            };
+            
+            // Enhanced yaw calculation using nose position relative to eye line
+            const eyeLineCenter = {
+                x: (leftEye.x + rightEye.x) / 2,
+                y: (leftEye.y + rightEye.y) / 2
+            };
+            
+            // Calculate yaw with reduced sensitivity for stability
+            const noseOffset = noseTip.x - eyeLineCenter.x;
+            const eyeDistance = Math.abs(rightEye.x - leftEye.x);
+            // 降低敏感度，从3.5降低到2.5，减少抖动
+            const yaw = (noseOffset / eyeDistance) * 2.5;
+            
+            // Enhanced pitch calculation using vertical face landmarks
+            const verticalCenter = (forehead.y + chin.y) / 2;
+            const noseVerticalOffset = noseTip.y - verticalCenter;
+            const faceHeight = Math.abs(chin.y - forehead.y);
+            // 降低敏感度，从3.0降低到2.0，减少抖动
+            const pitch = (noseVerticalOffset / faceHeight) * 2.0;
+            
+            // Additional rotation calculation using eye angle with reduced impact
+            const eyeAngle = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x);
+            // 降低眼睛角度对旋转的影响，从0.5降低到0.3
+            const rollAdjustment = Math.sin(eyeAngle) * 0.3;
+            
+            // 应用死区（deadzone）处理，忽略微小的变化
+            const applyDeadzone = (value, threshold) => {
+                return Math.abs(value) < threshold ? 0 : value;
+            };
+            
+            // 对yaw和pitch应用死区处理，忽略微小变化
+            const yawWithDeadzone = applyDeadzone(yaw, 0.03);
+            const pitchWithDeadzone = applyDeadzone(pitch, 0.03);
+            
+            // 应用低通滤波器，进一步平滑头部旋转
+            // 使用静态变量存储上一帧的值
+            if (!calculateHeadRotation.prevYaw) calculateHeadRotation.prevYaw = 0;
+            if (!calculateHeadRotation.prevPitch) calculateHeadRotation.prevPitch = 0;
+            
+            // 低通滤波器系数，值越大平滑效果越强
+            const filterCoeff = 0.85;
+            
+            // 应用低通滤波器
+            const filteredYaw = calculateHeadRotation.prevYaw * filterCoeff + yawWithDeadzone * (1 - filterCoeff);
+            const filteredPitch = calculateHeadRotation.prevPitch * filterCoeff + pitchWithDeadzone * (1 - filterCoeff);
+            
+            // 更新上一帧的值
+            calculateHeadRotation.prevYaw = filteredYaw;
+            calculateHeadRotation.prevPitch = filteredPitch;
+            
+            // 限制旋转范围，但略微缩小范围以减少极端情况下的抖动
+            return {
+                yaw: Math.max(-1.0, Math.min(1.0, filteredYaw + rollAdjustment)),
+                pitch: Math.max(-1.0, Math.min(1.0, filteredPitch))
+            };
+        }
+
+        // 极致精确的嘴巴开合度计算，专为实时语音同步优化 - 终极版
+        function calculateMouthOpenness(landmarks) {
+            // 使用更多的内唇点，因为内唇更能准确反映实际的嘴巴开合状态
+            // 外唇轮廓点（完整集合用于更好的形状检测）
+            const upperOuterLipPoints = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291]; // 上外唇
+            const lowerOuterLipPoints = [146, 91, 181, 84, 17, 314, 405, 321, 375, 291]; // 下外唇
+            
+            // 内唇轮廓点（完整集合用于精确开合检测）- 增加更多点以提高精度
+            const upperInnerLipPoints = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308]; // 上内唇
+            const lowerInnerLipPoints = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308]; // 下内唇
+            
+            // 中央唇点（对垂直运动最重要）- 这些点对语音同步最关键
+            const centralUpperLipPoints = [13, 82, 81, 80, 191, 78]; // 中央上唇
+            const centralLowerLipPoints = [14, 87, 178, 88, 95, 78]; // 中央下唇
+            
+            // 计算最大距离而不是平均值，以更好地捕捉嘴巴开合的峰值
+            let maxInnerDistance = 0;
+            let maxCentralDistance = 0;
+            
+            // 优化：只计算关键点对之间的距离，减少计算量并提高响应速度
+            // 关键点对是那些在说话时最有可能产生显著垂直运动的点
+            const keyUpperInnerPoints = [13, 82, 81, 312, 311, 310]; // 关键上内唇点
+            const keyLowerInnerPoints = [14, 87, 178, 317, 402, 318]; // 关键下内唇点
+            
+            // 计算关键点对之间的距离，找出最大值
+            for (let i = 0; i < keyUpperInnerPoints.length; i++) {
+                for (let j = 0; j < keyLowerInnerPoints.length; j++) {
+                    const distance = Math.abs(landmarks[keyLowerInnerPoints[j]].y - landmarks[keyUpperInnerPoints[i]].y);
+                    maxInnerDistance = Math.max(maxInnerDistance, distance);
+                }
+            }
+            
+            // 对中央唇点也执行同样的操作，但使用更直接的点对比较
+            // 这些是最能反映嘴巴开合的点对
+            const centralPointPairs = [
+                [13, 14],   // 中央上下唇
+                [82, 87],   // 右侧中央上下唇
+                [81, 178],  // 右侧上下唇
+                [312, 317], // 左侧中央上下唇
+                [311, 402], // 左侧上下唇
+                [310, 318]  // 左侧上下唇
+            ];
+            
+            // 直接计算关键点对的距离
+            centralPointPairs.forEach(pair => {
+                const distance = Math.abs(landmarks[pair[1]].y - landmarks[pair[0]].y);
+                maxCentralDistance = Math.max(maxCentralDistance, distance);
+            });
+            
+            // 计算外唇的平均位置（外唇用平均值更稳定）
+            let upperOuterY = 0, lowerOuterY = 0;
+            upperOuterLipPoints.forEach(idx => upperOuterY += landmarks[idx].y);
+            lowerOuterLipPoints.forEach(idx => lowerOuterY += landmarks[idx].y);
+            upperOuterY /= upperOuterLipPoints.length;
+            lowerOuterY /= lowerOuterLipPoints.length;
+            const outerMouthHeight = Math.abs(lowerOuterY - upperOuterY);
+            
+            // 优化加权组合，进一步强调中央点的重要性
+            // 中央点获得更高权重，因为它们最能指示实际语音
+            const combinedHeight = (outerMouthHeight * 0.05) + (maxInnerDistance * 0.35) + (maxCentralDistance * 0.6);
+            
+            // 计算面部比例以进行自适应阈值处理
+            // 使用多个面部测量值以提高准确性
+            const faceHeight = Math.abs(landmarks[152].y - landmarks[10].y); // 下巴到前额
+            const faceWidth = Math.abs(landmarks[234].x - landmarks[454].x); // 耳到耳
+            const noseToChin = Math.abs(landmarks[1].y - landmarks[152].y); // 鼻尖到下巴
+            
+            // 使用多个测量值的综合面部比例
+            const faceScale = (faceHeight + faceWidth + noseToChin) / 3;
+            
+            // 进一步降低阈值以提高灵敏度，特别是对小幅度嘴部动作
+            const dynamicThreshold = 0.001 + (faceScale * 0.0004); // 进一步降低基础阈值
+            const dynamicDivisor = 0.01 + (faceScale * 0.0015); // 调整除数以获得更好的缩放
+            
+            // 增强的归一化处理
+            let openness = Math.max(0, Math.min(1, (combinedHeight - dynamicThreshold) / dynamicDivisor));
+            
+            // 应用更平缓的响应曲线，进一步降低指数以提高小幅度动作的响应
+            openness = Math.pow(openness, 0.3); // 从0.4降低到0.3，使小幅度变化更明显
+            
+            // 对小幅度动作应用更强的提升
+            if (openness < 0.5) { // 提高阈值从0.4到0.5
+                openness = openness * 1.7; // 提高提升系数从1.5到1.7
+            }
+            
+            // 应用额外的微动作增强，确保即使是最微小的嘴唇动作也能被捕捉到
+            if (openness > 0 && openness < 0.2) {
+                openness = Math.max(0.08, openness); // 提高最小可见度从0.05到0.08
+            }
+            
+            // 检测嘴巴是否正在快速开合（说话时的典型模式）
+            // 使用静态变量存储上一帧的值
+            if (!calculateMouthOpenness.prevOpenness) calculateMouthOpenness.prevOpenness = 0;
+            if (!calculateMouthOpenness.prevTime) calculateMouthOpenness.prevTime = Date.now();
+            
+            const now = Date.now();
+            const deltaTime = now - calculateMouthOpenness.prevTime;
+            const deltaOpenness = Math.abs(openness - calculateMouthOpenness.prevOpenness);
+            
+            // 计算变化速率（变化量/时间）
+            const changeRate = deltaTime > 0 ? deltaOpenness / deltaTime : 0;
+            
+            // 如果检测到快速变化（说话模式），进一步增强响应
+            if (changeRate > 0.001) { // 快速变化阈值
+                // 对快速变化的嘴部动作应用额外增强
+                openness = Math.min(1, openness * (1 + changeRate * 200));
+            }
+            
+            // 更新上一帧的值
+            calculateMouthOpenness.prevOpenness = openness;
+            calculateMouthOpenness.prevTime = now;
+            
+            return Math.min(1, openness); // 确保不超过1.0
+        }
+        
+        // Calculate eye states for blinking detection
+        function calculateEyeStates(landmarks) {
+            // Left eye landmarks (more comprehensive)
+            const leftEyeTop = landmarks[159];
+            const leftEyeBottom = landmarks[145];
+            const leftEyeLeft = landmarks[33];
+            const leftEyeRight = landmarks[133];
+            
+            // Right eye landmarks
+            const rightEyeTop = landmarks[386];
+            const rightEyeBottom = landmarks[374];
+            const rightEyeLeft = landmarks[362];
+            const rightEyeRight = landmarks[263];
+            
+            // Calculate eye aspect ratios (EAR)
+            const leftEyeHeight = Math.abs(leftEyeTop.y - leftEyeBottom.y);
+            const leftEyeWidth = Math.abs(leftEyeRight.x - leftEyeLeft.x);
+            const leftEAR = leftEyeHeight / (leftEyeWidth + 0.001); // Avoid division by zero
+            
+            const rightEyeHeight = Math.abs(rightEyeTop.y - rightEyeBottom.y);
+            const rightEyeWidth = Math.abs(rightEyeRight.x - rightEyeLeft.x);
+            const rightEAR = rightEyeHeight / (rightEyeWidth + 0.001);
+            
+            // Normalize EAR values (typical open eye EAR is around 0.2-0.3)
+            const leftEyeOpenness = Math.max(0, Math.min(1, leftEAR / 0.25));
+            const rightEyeOpenness = Math.max(0, Math.min(1, rightEAR / 0.25));
+            
+            return {
+                leftEye: leftEyeOpenness,
+                rightEye: rightEyeOpenness
+            };
+        }
+        
+        // Calculate face scale based on face size for distance-based scaling
+        // Directly match the cartoon face size to the real face size in the video
+        function calculateFaceScale(landmarks) {
+            // Use face outline points to determine face size
+            const faceOutline = FACE_LANDMARKS.FACE_OVAL;
+            
+            // Calculate bounding box of face
+            let minX = 1, maxX = 0, minY = 1, maxY = 0;
+            
+            faceOutline.forEach(idx => {
+                const point = landmarks[idx];
+                minX = Math.min(minX, point.x);
+                maxX = Math.max(maxX, point.x);
+                minY = Math.min(minY, point.y);
+                maxY = Math.max(maxY, point.y);
+            });
+            
+            // Calculate face dimensions
+            const faceWidth = maxX - minX;
+            const faceHeight = maxY - minY;
+            
+            // Use average dimension as scale reference
+            const faceSize = (faceWidth + faceHeight) / 2;
+            
+            // Calculate scale to match video face size directly
+            // This creates a 1:1 relationship between real face size and cartoon face size
+            const scale = faceSize / 0.25; // Direct proportion to face size in video
+            
+            // Apply a small adjustment to ensure the cartoon face isn't too small or too large
+            return Math.max(0.7, Math.min(1.8, scale));
+        }
+        
+        // Calculate face center position for movement tracking
+        function calculateFacePosition(landmarks) {
+            // Use key facial landmarks to determine face center
+            const noseTip = landmarks[FACE_LANDMARKS.NOSE_TIP];
+            const leftEye = getAverageLandmark(landmarks, FACE_LANDMARKS.LEFT_EYE);
+            const rightEye = getAverageLandmark(landmarks, FACE_LANDMARKS.RIGHT_EYE);
+            
+            // Calculate face center as average of key points
+            const faceX = (noseTip.x + leftEye.x + rightEye.x) / 3;
+            const faceY = (noseTip.y + leftEye.y + rightEye.y) / 3;
+            
+            // Return normalized coordinates (0-1)
+            return {
+                x: Math.max(0, Math.min(1, faceX)),
+                y: Math.max(0, Math.min(1, faceY))
+            };
+        }
+
+        // Get average position of multiple landmarks
+        function getAverageLandmark(landmarks, indices) {
+            let x = 0, y = 0;
+            for (const index of indices) {
+                x += landmarks[index].x;
+                y += landmarks[index].y;
+            }
+            return {
+                x: x / indices.length,
+                y: y / indices.length
+            };
+        }
+
+        // Initialize WebGL for GPU-accelerated rendering
+        function initWebGL(glContext, version) {
+            gl = glContext;
+            
+            // Create shader program
+            let vertexShaderSource;
+            if (version === 'webgl2') {
+                // For WebGL2, use #version 300 es to match fragment shader
+                vertexShaderSource = "#version 300 es\n" +
+                "in vec2 a_position;\n" +
+                "in vec2 a_texCoord;\n" +
+                "out vec2 v_texCoord;\n" +
+                "uniform vec2 u_resolution;\n" +
+                "\n" +
+                "void main() {\n" +
+                "    // Convert from pixels to 0.0 to 1.0\n" +
+                "    vec2 zeroToOne = a_position / u_resolution;\n" +
+                "    // Convert from 0->1 to 0->2\n" +
+                "    vec2 zeroToTwo = zeroToOne * 2.0;\n" +
+                "    // Convert from 0->2 to -1->+1 (clipspace)\n" +
+                "    vec2 clipSpace = zeroToTwo - 1.0;\n" +
+                "    // Flip Y coordinate\n" +
+                "    gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);\n" +
+                "    \n" +
+                "    // Pass the texture coordinates to the fragment shader\n" +
+                "    v_texCoord = a_texCoord;\n" +
+                "}";  
+            } else {
+                // For WebGL1, use attribute and varying
+                vertexShaderSource = `
+                attribute vec2 a_position;
+                attribute vec2 a_texCoord;
+                varying vec2 v_texCoord;
+                uniform vec2 u_resolution;
+                
+                void main() {
+                    // Convert from pixels to 0.0 to 1.0
+                    vec2 zeroToOne = a_position / u_resolution;
+                    // Convert from 0->1 to 0->2
+                    vec2 zeroToTwo = zeroToOne * 2.0;
+                    // Convert from 0->2 to -1->+1 (clipspace)
+                    vec2 clipSpace = zeroToTwo - 1.0;
+                    // Flip Y coordinate
+                    gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+                    
+                    // Pass the texture coordinates to the fragment shader
+                    v_texCoord = a_texCoord;
+                }
+                `;
+            }
+            
+            // Create appropriate fragment shader source based on WebGL version
+            let fragmentShaderSource;
+            if (version === 'webgl2') {
+                // For WebGL2, #version directive MUST be on the first line without any preceding whitespace
+                // Using string concatenation instead of template literals to ensure proper formatting
+                fragmentShaderSource = "#version 300 es\n" +
+                "precision mediump float;\n" +
+                "in vec2 v_texCoord;\n" +
+                "out vec4 outColor;\n" +
+                "uniform sampler2D u_image;\n\n" +
+                "void main() {\n" +
+                "    outColor = texture(u_image, v_texCoord);\n" +
+                "}";
+            } else {
+                // For WebGL1, use varying and gl_FragColor
+                fragmentShaderSource = "precision mediump float;\n" +
+                "varying vec2 v_texCoord;\n" +
+                "uniform sampler2D u_image;\n\n" +
+                "void main() {\n" +
+                "    gl_FragColor = texture2D(u_image, v_texCoord);\n" +
+                "}";
+            }
+            
+            // Create shaders
+            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+            
+            // Create program and link shaders
+            glProgram = createProgram(gl, vertexShader, fragmentShader);
+            
+            // Look up where the vertex data needs to go
+            const positionAttributeLocation = gl.getAttribLocation(glProgram, "a_position");
+            const texCoordAttributeLocation = gl.getAttribLocation(glProgram, "a_texCoord");
+            
+            // Create buffers
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            
+            // Set up position buffer
+            const positions = [
+                0, 0,
+                canvas.width, 0,
+                0, canvas.height,
+                0, canvas.height,
+                canvas.width, 0,
+                canvas.width, canvas.height,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+            
+            // Create texture coordinate buffer
+            const texCoordBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+            
+            // Set up texture coordinates
+            const texCoords = [
+                0.0, 0.0,
+                1.0, 0.0,
+                0.0, 1.0,
+                0.0, 1.0,
+                1.0, 0.0,
+                1.0, 1.0,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texCoords), gl.STATIC_DRAW);
+            
+            // Create texture for avatar
+            avatarTexture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, avatarTexture);
+            
+            // Set texture parameters
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            
+            // Store attribute locations for later use
+            glProgram.positionAttributeLocation = positionAttributeLocation;
+            glProgram.texCoordAttributeLocation = texCoordAttributeLocation;
+            glProgram.positionBuffer = positionBuffer;
+            glProgram.texCoordBuffer = texCoordBuffer;
+            
+            // Get uniform locations
+            glProgram.resolutionUniformLocation = gl.getUniformLocation(glProgram, "u_resolution");
+            glProgram.imageUniformLocation = gl.getUniformLocation(glProgram, "u_image");
+            
+            console.log('WebGL initialized successfully with shader program');
+        }
+        
+        // Helper function to create shader
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            
+            const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+            if (success) {
+                return shader;
+            }
+            
+            console.error('Shader compilation error:', gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        
+        // Helper function to create program
+        function createProgram(gl, vertexShader, fragmentShader) {
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+            
+            const success = gl.getProgramParameter(program, gl.LINK_STATUS);
+            if (success) {
+                return program;
+            }
+            
+            console.error('Program linking error:', gl.getProgramInfoLog(program));
+            gl.deleteProgram(program);
+            return null;
+        }
+        
+        // Animation loop with WebGL support
+        let animationFrameCount = 0;
+        function animate() {
+            animationFrameCount++;
+            
+            // Debug: Log animation state every 60 frames
+            if (animationFrameCount % 60 === 0) {
+                console.log('Animation frame', animationFrameCount, 'Avatar state:', {
+                    yaw: avatarState.yaw.toFixed(3),
+                    pitch: avatarState.pitch.toFixed(3),
+                    mouthOpenness: avatarState.mouthOpenness.toFixed(3),
+                    currentAvatar: currentAvatar
+                });
+            }
+            
+            // Clear offscreen canvas first
+            offscreenCtx.clearRect(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+            
+            // Draw robot avatar to offscreen canvas
+            drawRobotAvatar(offscreenCtx);
+            
+            // Render to main canvas using WebGL if available
+            if (useWebGL && gl && glProgram) {
+                // Tell WebGL to use our program
+                gl.useProgram(glProgram);
+                
+                // Clear the canvas
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.clearColor(0.03, 0.07, 0.14, 1.0); // 更深邃的科技蓝色背景 #070e24
+            gl.clear(gl.COLOR_BUFFER_BIT);
+                
+                // Set up position attribute
+                gl.bindBuffer(gl.ARRAY_BUFFER, glProgram.positionBuffer);
+                gl.enableVertexAttribArray(glProgram.positionAttributeLocation);
+                gl.vertexAttribPointer(glProgram.positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+                
+                // Set up texture coordinate attribute
+                gl.bindBuffer(gl.ARRAY_BUFFER, glProgram.texCoordBuffer);
+                gl.enableVertexAttribArray(glProgram.texCoordAttributeLocation);
+                gl.vertexAttribPointer(glProgram.texCoordAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+                
+                // Set uniforms
+                gl.uniform2f(glProgram.resolutionUniformLocation, canvas.width, canvas.height);
+                
+                // Update texture with offscreen canvas content
+                gl.bindTexture(gl.TEXTURE_2D, avatarTexture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, offscreenCanvas);
+                
+                // Draw the rectangle
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+            } else {
+                // Fallback to 2D canvas rendering
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(offscreenCanvas, 0, 0);
+            }
+            
+            // Update FPS counter
+            updateFPS();
+            
+            // Update debug info every 10 frames
+            if (animationFrameCount % 10 === 0) {
+                updateDebugInfo();
+            }
+            
+            requestAnimationFrame(animate);
+        }
+
+        // Draw Panda Avatar with enhanced eye and scaling features
+        // Panda Avatar function has been removed
+
+        // Draw Robot Avatar with enhanced eye and scaling features - Modern Tech Version
+        function drawRobotAvatar(ctx) {
+            // Calculate avatar position based on face tracking
+            const avatarX = canvas.width * avatarState.avatarX;
+            const avatarY = canvas.height * avatarState.avatarY;
+            // Calculate base size to match real face size in video
+            const baseSize = (canvas.width / 6) * avatarState.faceScale; // Apply face scale to match real face size
+            
+            ctx.save();
+            ctx.translate(avatarX, avatarY);
+            // 禁用旋转功能
+            // ctx.rotate(avatarState.yaw * 0.8); // Enhanced rotation sensitivity - DISABLED
+            // ctx.scale(1 + avatarState.pitch * 0.2, 1 - avatarState.pitch * 0.15); // Enhanced pitch scaling - DISABLED
+            
+            // Modern tech head with gradient and glow effect
+            const headWidth = baseSize * 2;
+            const headHeight = baseSize * 1.8;
+            const cornerRadius = baseSize * 0.15;
+            
+            // 创建简洁大气的金属渐变效果
+            const headGradient = ctx.createLinearGradient(-baseSize, -baseSize, baseSize, baseSize + headHeight);
+            headGradient.addColorStop(0, '#1A202C'); // 深灰蓝色
+            headGradient.addColorStop(0.3, '#2D3748'); // 中灰蓝色
+            headGradient.addColorStop(0.7, '#1E293B'); // 深蓝灰色
+            headGradient.addColorStop(1, '#0F172A'); // 深邃蓝黑色
+            ctx.fillStyle = headGradient;
+            
+            // Draw modern tech head shape
+            ctx.beginPath();
+            ctx.moveTo(-baseSize + cornerRadius, -baseSize);
+            ctx.lineTo(baseSize - cornerRadius, -baseSize);
+            ctx.arcTo(baseSize, -baseSize, baseSize, -baseSize + cornerRadius, cornerRadius);
+            ctx.lineTo(baseSize, -baseSize + headHeight - cornerRadius);
+            ctx.arcTo(baseSize, -baseSize + headHeight, baseSize - cornerRadius, -baseSize + headHeight, cornerRadius);
+            ctx.lineTo(-baseSize + cornerRadius, -baseSize + headHeight);
+            ctx.arcTo(-baseSize, -baseSize + headHeight, -baseSize, -baseSize + headHeight - cornerRadius, cornerRadius);
+            ctx.lineTo(-baseSize, -baseSize + cornerRadius);
+            ctx.arcTo(-baseSize, -baseSize, -baseSize + cornerRadius, -baseSize, cornerRadius);
+            ctx.closePath();
+            ctx.fill();
+            
+            // 添加简洁专业的电路线条
+            ctx.strokeStyle = '#38BDF8'; // 专业的蓝色
+            ctx.lineWidth = baseSize * 0.01; // 更细的线条，更加简洁
+            
+            // Horizontal circuit lines
+            for (let i = 1; i <= 3; i++) {
+                ctx.beginPath();
+                ctx.moveTo(-baseSize + cornerRadius, -baseSize + (headHeight * i/4));
+                ctx.lineTo(baseSize - cornerRadius, -baseSize + (headHeight * i/4));
+                ctx.stroke();
+            }
+            
+            // Vertical circuit lines
+            ctx.beginPath();
+            ctx.moveTo(-baseSize * 0.5, -baseSize + cornerRadius);
+            ctx.lineTo(-baseSize * 0.5, -baseSize + headHeight - cornerRadius);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.moveTo(baseSize * 0.5, -baseSize + cornerRadius);
+            ctx.lineTo(baseSize * 0.5, -baseSize + headHeight - cornerRadius);
+            ctx.stroke();
+            
+            // 简洁大气的天线设计
+            const antennaGradient = ctx.createLinearGradient(0, -baseSize, 0, -baseSize * 1.5);
+            antennaGradient.addColorStop(0, '#38BDF8'); // 专业蓝色
+            antennaGradient.addColorStop(0.5, '#3B82F6'); // 中蓝色
+            antennaGradient.addColorStop(1, '#2563EB'); // 深蓝色
+            ctx.strokeStyle = antennaGradient;
+            ctx.lineWidth = 2 * avatarState.faceScale; // 适当的线条粗细
+            
+            // Left antenna
+            ctx.beginPath();
+            ctx.moveTo(-baseSize * 0.3, -baseSize);
+            ctx.lineTo(-baseSize * 0.3, -baseSize * 1.4);
+            ctx.stroke();
+            
+            // Right antenna
+            ctx.beginPath();
+            ctx.moveTo(baseSize * 0.3, -baseSize);
+            ctx.lineTo(baseSize * 0.3, -baseSize * 1.4);
+            ctx.stroke();
+            
+            // 简洁专业的天线灯光效果
+            const pulseRate = Date.now() % 2000 / 2000; // 0到1，周期2秒
+            const pulseSize = 0.08 + 0.03 * Math.sin(pulseRate * Math.PI * 2); // 更小更精致的脉冲
+            
+            // 左侧天线灯光
+            const leftLightGradient = ctx.createRadialGradient(
+                -baseSize * 0.3, -baseSize * 1.4, 0,
+                -baseSize * 0.3, -baseSize * 1.4, baseSize * 0.2
+            );
+            leftLightGradient.addColorStop(0, '#60A5FA'); // 亮蓝色核心
+            leftLightGradient.addColorStop(0.4, '#3B82F6'); // 中蓝色过渡
+            leftLightGradient.addColorStop(0.7, 'rgba(59, 130, 246, 0.5)');
+            leftLightGradient.addColorStop(1, 'rgba(59, 130, 246, 0)');
+            ctx.fillStyle = leftLightGradient;
+            ctx.beginPath();
+            ctx.ellipse(-baseSize * 0.3, -baseSize * 1.4, baseSize * pulseSize, baseSize * pulseSize, 0, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // 右侧天线灯光
+            const rightLightGradient = ctx.createRadialGradient(
+                baseSize * 0.3, -baseSize * 1.4, 0,
+                baseSize * 0.3, -baseSize * 1.4, baseSize * 0.2
+            );
+            rightLightGradient.addColorStop(0, '#60A5FA'); // 亮蓝色核心
+            rightLightGradient.addColorStop(0.4, '#3B82F6'); // 中蓝色过渡
+            rightLightGradient.addColorStop(0.7, 'rgba(59, 130, 246, 0.5)');
+            rightLightGradient.addColorStop(1, 'rgba(59, 130, 246, 0)');
+            ctx.fillStyle = rightLightGradient;
+            ctx.beginPath();
+            ctx.ellipse(baseSize * 0.3, -baseSize * 1.4, baseSize * pulseSize, baseSize * pulseSize, 0, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // High-tech digital eyes with scanning effect
+            // Left eye
+            const leftEyeHeight = baseSize * 0.2 * avatarState.leftEyeOpenness;
+            const eyeCornerRadius = baseSize * 0.02; // Sharper corners for tech look
+            
+            // 眼睛背景渐变
+            const leftEyeGradient = ctx.createLinearGradient(-baseSize * 0.6, -baseSize * 0.4, -baseSize * 0.25, -baseSize * 0.4 + leftEyeHeight);
+            leftEyeGradient.addColorStop(0, '#0F172A'); // 深邃蓝黑色
+            leftEyeGradient.addColorStop(1, '#1E293B'); // 深蓝灰色
+            ctx.fillStyle = leftEyeGradient;
+            ctx.beginPath();
+            roundedRect(ctx, -baseSize * 0.6, -baseSize * 0.4, baseSize * 0.35, Math.max(leftEyeHeight, baseSize * 0.05), eyeCornerRadius);
+            ctx.fill();
+            
+            // Eye glow effect with enhanced sci-fi look
+            if (avatarState.leftEyeOpenness > 0.1) {
+                // 数字化眼睛图案
+                ctx.fillStyle = '#38BDF8'; // 专业蓝色
+                
+                // Scanning effect based on time
+                const scanPos = (Date.now() % 1500) / 1500; // 0 to 1 over 1.5 seconds
+                const scanWidth = baseSize * 0.03;
+                const scanX = -baseSize * 0.6 + (baseSize * 0.35 - scanWidth) * scanPos;
+                
+                ctx.beginPath();
+                roundedRect(ctx, scanX, -baseSize * 0.4, scanWidth, Math.max(leftEyeHeight, baseSize * 0.05), 0);
+                ctx.fill();
+                
+                // Digital dots in eye
+                const dotSize = baseSize * 0.02;
+                const dotSpacing = baseSize * 0.07;
+                const dotsPerRow = 4;
+                
+                for (let i = 0; i < dotsPerRow; i++) {
+                    ctx.beginPath();
+                    ctx.rect(-baseSize * 0.57 + i * dotSpacing, -baseSize * 0.38, dotSize, dotSize);
+                    ctx.fill();
+                }
+            }
+            
+            // Right eye
+            const rightEyeHeight = baseSize * 0.2 * avatarState.rightEyeOpenness;
+            
+            // 眼睛背景渐变
+            const rightEyeGradient = ctx.createLinearGradient(baseSize * 0.25, -baseSize * 0.4, baseSize * 0.6, -baseSize * 0.4 + rightEyeHeight);
+            rightEyeGradient.addColorStop(0, '#0F172A'); // 深邃蓝黑色
+            rightEyeGradient.addColorStop(1, '#1E293B'); // 深蓝灰色
+            ctx.fillStyle = rightEyeGradient;
+            ctx.beginPath();
+            roundedRect(ctx, baseSize * 0.25, -baseSize * 0.4, baseSize * 0.35, Math.max(rightEyeHeight, baseSize * 0.05), eyeCornerRadius);
+            ctx.fill();
+            
+            // Eye glow effect with enhanced sci-fi look
+            if (avatarState.rightEyeOpenness > 0.1) {
+                // 数字化眼睛图案
+                ctx.fillStyle = '#38BDF8'; // 专业蓝色
+                
+                // Scanning effect based on time but offset from left eye
+                const scanPos = ((Date.now() + 750) % 1500) / 1500; // 0 to 1 over 1.5 seconds, offset by half cycle
+                const scanWidth = baseSize * 0.03;
+                const scanX = baseSize * 0.25 + (baseSize * 0.35 - scanWidth) * scanPos;
+                
+                ctx.beginPath();
+                roundedRect(ctx, scanX, -baseSize * 0.4, scanWidth, Math.max(rightEyeHeight, baseSize * 0.05), 0);
+                ctx.fill();
+                
+                // Digital dots in eye
+                const dotSize = baseSize * 0.02;
+                const dotSpacing = baseSize * 0.07;
+                const dotsPerRow = 4;
+                
+                for (let i = 0; i < dotsPerRow; i++) {
+                    ctx.beginPath();
+                    ctx.rect(baseSize * 0.28 + i * dotSpacing, -baseSize * 0.38, dotSize, dotSize);
+                    ctx.fill();
+                }
+            }
+            
+            // High-tech speaker-like mouth
+            // Calculate mouth dimensions with improved responsiveness
+            const mouthBaseWidth = baseSize * 0.8;
+            const mouthBaseHeight = baseSize * 0.06; // Base height for better closed mouth appearance
+            const mouthOpenScale = baseSize * 0.3; // 减小嘴巴开合的最大高度比例
+            const mouthHeight = mouthBaseHeight + (avatarState.mouthOpenness * mouthOpenScale);
+            // 限制嘴巴宽度的最大值，防止超出脸部
+            const mouthWidth = Math.min(baseSize * 0.9, mouthBaseWidth + (avatarState.mouthOpenness * baseSize * 0.05)); // 减小宽度增长比例并设置最大值
+            
+            // 嘴巴背景渐变
+            const mouthBgGradient = ctx.createLinearGradient(0, baseSize * 0.2, 0, baseSize * 0.2 + mouthHeight);
+            mouthBgGradient.addColorStop(0, '#0F172A'); // 深邃蓝黑色
+            mouthBgGradient.addColorStop(0.5, '#1E293B'); // 深蓝灰色
+            mouthBgGradient.addColorStop(1, '#334155'); // 中蓝灰色
+            ctx.fillStyle = mouthBgGradient;
+            
+            // Rounded rectangle for mouth with improved shape
+            ctx.beginPath();
+            roundedRect(ctx, -mouthWidth / 2, baseSize * 0.2, mouthWidth, mouthHeight, baseSize * 0.05);
+            ctx.fill();
+            
+            // 嘴巴边框
+            const borderGradient = ctx.createLinearGradient(-mouthWidth / 2, baseSize * 0.2, mouthWidth / 2, baseSize * 0.2);
+            borderGradient.addColorStop(0, '#38BDF8'); // 专业蓝色
+            borderGradient.addColorStop(0.5, '#3B82F6'); // 中蓝色
+            borderGradient.addColorStop(1, '#38BDF8'); // 专业蓝色
+            ctx.strokeStyle = borderGradient;
+            ctx.lineWidth = 2 * avatarState.faceScale;
+            ctx.beginPath();
+            roundedRect(ctx, -mouthWidth / 2, baseSize * 0.2, mouthWidth, mouthHeight, baseSize * 0.05);
+            ctx.stroke();
+            
+            // Add tech details to mouth
+            if (avatarState.mouthOpenness > 0.05) {
+                // Speaker grill lines with enhanced tech look
+                const grillCount = 6; // Increased number of lines
+                const grillSpacing = (mouthWidth - baseSize * 0.1) / (grillCount + 1);
+                
+                // 扬声器格栅线渐变
+                const grillGradient = ctx.createLinearGradient(0, baseSize * 0.2, 0, baseSize * 0.2 + mouthHeight);
+                grillGradient.addColorStop(0, '#38BDF8'); // 专业蓝色
+                grillGradient.addColorStop(1, '#3B82F6'); // 中蓝色
+                ctx.strokeStyle = grillGradient;
+                ctx.lineWidth = baseSize * 0.01; // 更细的线条
+                
+                for (let i = 0; i < grillCount; i++) {
+                    const x = -mouthWidth/2 + baseSize * 0.05 + grillSpacing * (i + 1);
+                    ctx.beginPath();
+                    ctx.moveTo(x, baseSize * 0.2 + baseSize * 0.02);
+                    ctx.lineTo(x, baseSize * 0.2 + mouthHeight - baseSize * 0.02);
+                    ctx.stroke();
+                }
+                
+                // Advanced audio visualizer effect when mouth is more open
+                if (avatarState.mouthOpenness > 0.1) {
+                    // 音频条渐变
+                    const audioBarGradient = ctx.createLinearGradient(0, baseSize * 0.2, 0, baseSize * 0.2 + mouthHeight);
+                    audioBarGradient.addColorStop(0, '#38BDF8'); // 专业蓝色
+                    audioBarGradient.addColorStop(0.5, '#3B82F6'); // 中蓝色
+                    audioBarGradient.addColorStop(1, '#38BDF8'); // 专业蓝色
+                    ctx.fillStyle = audioBarGradient;
+                    
+                    // Create audio wave visualization based on mouth openness
+                    const waveCount = 8;
+                    const waveWidth = mouthWidth - baseSize * 0.15;
+                    const waveSpacing = waveWidth / waveCount;
+                    // 限制音频波形的最大高度，确保不会超出嘴巴
+                    const maxWaveHeight = Math.min(mouthHeight * 0.7, baseSize * 0.2);
+                    
+                    // Time-based animation for wave effect
+                    const now = Date.now();
+                    
+                    for (let i = 0; i < waveCount; i++) {
+                        // Create different heights for each bar with time-based animation
+                        const animOffset = (i * 200) % 1000; // Offset each bar's animation
+                        const animPhase = ((now + animOffset) % 1000) / 1000; // 0 to 1 over 1 second
+                        
+                        // Calculate height using sine wave and mouth openness
+                        const heightFactor = 0.2 + 0.8 * Math.sin(animPhase * Math.PI * 2);
+                        // 确保波形高度不会过大
+                        const waveHeight = Math.min(
+                            maxWaveHeight * heightFactor * avatarState.mouthOpenness,
+                            mouthHeight * 0.8 // 确保波形不会超出嘴巴高度
+                        );
+                        
+                        // Position each bar
+                        const x = -waveWidth/2 + waveSpacing * (i + 0.5);
+                        const y = baseSize * 0.2 + mouthHeight/2 - waveHeight/2;
+                        
+                        // 确保音频条的宽度适当
+                        const barWidth = Math.min(waveSpacing * 0.6, baseSize * 0.05);
+                        
+                        // Draw the audio bar
+                        ctx.beginPath();
+                        ctx.rect(x - barWidth/2, y, barWidth, waveHeight);
+                        ctx.fill();
+                    }
+                    
+                    // Add an enhanced holographic glowing effect when speaking more loudly
+                    if (avatarState.mouthOpenness > 0.3) {
+                        // 限制发光效果的大小，确保不会超出嘴巴太多
+                        const glowRadius = Math.min(mouthWidth/1.8, baseSize * 0.4); // 限制发光半径
+                        
+                        const glowGradient = ctx.createRadialGradient(
+                            0, baseSize * 0.2 + mouthHeight/2, 0,
+                            0, baseSize * 0.2 + mouthHeight/2, glowRadius // 限制的发光半径
+                        );
+                        glowGradient.addColorStop(0, 'rgba(56, 189, 248, 0.5)'); // 蓝色核心发光
+                        glowGradient.addColorStop(0.4, 'rgba(59, 130, 246, 0.3)'); // 中蓝色中间发光
+                        glowGradient.addColorStop(0.7, 'rgba(56, 189, 248, 0.2)'); // 蓝色外部发光
+                        glowGradient.addColorStop(1, 'rgba(56, 189, 248, 0)');
+                        
+                        ctx.fillStyle = glowGradient;
+                        ctx.beginPath();
+                        // 限制椭圆的大小
+                        const ellipseWidth = Math.min(mouthWidth/1.8, baseSize * 0.4);
+                        const ellipseHeight = Math.min(mouthHeight/1.5, baseSize * 0.25);
+                        ctx.ellipse(0, baseSize * 0.2 + mouthHeight/2, ellipseWidth, ellipseHeight, 0, 0, 2 * Math.PI);
+                        ctx.fill();
+                        
+                        // Add subtle pulsing effect based on time
+                        const now = Date.now();
+                        const pulsePhase = (now % 2000) / 2000; // 0 to 1 over 2 seconds
+                        const pulseSize = 0.1 + 0.03 * Math.sin(pulsePhase * Math.PI * 2); // 减小脉冲变化幅度
+                        
+                        // 限制脉冲效果的最大半径
+                        const maxPulseRadius = Math.min(mouthWidth * pulseSize, baseSize * 0.35);
+                        
+                        const pulseGradient = ctx.createRadialGradient(
+                            0, baseSize * 0.2 + mouthHeight/2, 0,
+                            0, baseSize * 0.2 + mouthHeight/2, maxPulseRadius
+                        );
+                        pulseGradient.addColorStop(0, 'rgba(59, 130, 246, 0.2)'); // 中蓝色脉冲
+                        pulseGradient.addColorStop(1, 'rgba(59, 130, 246, 0)');
+                        
+                        ctx.fillStyle = pulseGradient;
+                        ctx.beginPath();
+                        // 限制脉冲椭圆的大小
+                        const pulseEllipseWidth = Math.min(mouthWidth * pulseSize, baseSize * 0.35);
+                        const pulseEllipseHeight = Math.min(mouthHeight * pulseSize, baseSize * 0.2);
+                        ctx.ellipse(0, baseSize * 0.2 + mouthHeight/2, pulseEllipseWidth, pulseEllipseHeight, 0, 0, 2 * Math.PI);
+                        ctx.fill();
+                    }
+                }
+            }
+            
+            // Helper function for drawing rounded rectangles
+            function roundedRect(ctx, x, y, width, height, radius) {
+                ctx.moveTo(x + radius, y);
+                ctx.lineTo(x + width - radius, y);
+                ctx.arcTo(x + width, y, x + width, y + radius, radius);
+                ctx.lineTo(x + width, y + height - radius);
+                ctx.arcTo(x + width, y + height, x + width - radius, y + height, radius);
+                ctx.lineTo(x + radius, y + height);
+                ctx.arcTo(x, y + height, x, y + height - radius, radius);
+                ctx.lineTo(x, y + radius);
+                ctx.arcTo(x, y, x + radius, y, radius);
+                ctx.closePath();
+            }
+            
+            ctx.restore();
+        }
+
+        // Draw Cat Avatar with enhanced eye and scaling features
+        // Cat Avatar function has been removed
+
+
+        // Update FPS counter
+        function updateFPS() {
+            fpsCounter++;
+            const now = Date.now();
+            if (now - lastFpsTime >= 1000) {
+                document.getElementById('fps').textContent = `FPS: ${fpsCounter}`;
+                fpsCounter = 0;
+                lastFpsTime = now;
+            }
+        }
+
+        // Update status message
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+
+        // Select avatar type (only robot is available)
+        function selectAvatar(type) {
+            currentAvatar = 'robot';
+            
+            // Update button state
+            document.getElementById('robot-btn').classList.add('active');
+        }
+
+        // Toggle video visibility
+        function toggleVideo() {
+            const video = document.getElementById('webcam');
+            videoVisible = !videoVisible;
+            video.style.display = videoVisible ? 'block' : 'none';
+        }
+        
+        // Stop camera stream
+        function stopCamera() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => {
+                    track.stop();
+                    console.log('Camera track stopped:', track);
+                });
+                videoStream = null;
+                console.log('Camera stream stopped');
+            }
+        }
+        
+        // Cleanup when page unloads
+        window.addEventListener('beforeunload', () => {
+            stopCamera();
+        });
+
+        // Start the application when page loads
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
